@@ -37,6 +37,10 @@ Give concise and specific reasons based only on the evidence provided.
 """
 
 
+class AIServiceError(Exception):
+    pass
+
+
 def analyze_scam(request: AnalyzeRequest) -> AnalyzeResponse:
     prompt = f"""
 {SYSTEM_PROMPT}
@@ -53,19 +57,29 @@ URL:
 {request.url or "None provided"}
 """
 
-    response = client.interactions.create(
-        model="gemini-3.6-flash",
-        input=prompt,
-        response_format={
-            "type": "text",
-            "mime_type": "application/json",
-            "schema": AnalyzeResponse.model_json_schema(),
-        },
-    )
+    try:
+        response = client.interactions.create(
+            model="gemini-3.6-flash",
+            input=prompt,
+            response_format={
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": AnalyzeResponse.model_json_schema(),
+            },
+        )
 
-    output_text = response.output_text
+        output_text = response.output_text
 
-    if not output_text:
-        raise ValueError("Gemini returned no output text")
+        if not output_text:
+            raise AIServiceError("Gemini returned an empty response")
 
-    return AnalyzeResponse.model_validate_json(output_text)
+        return AnalyzeResponse.model_validate_json(output_text)
+
+    except ValidationError as error:
+        raise AIServiceError("Gemini returned an invalid structured response") from error
+
+    except AIServiceError:
+        raise
+
+    except Exception as error:
+        raise AIServiceError("Failed to analyze message with Gemini") from error
