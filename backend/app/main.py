@@ -1,7 +1,14 @@
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.schemas import AnalyzeRequest, AnalyzeResponse
+from app.schemas import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    AnalysisHistoryItem,
+)
 from app.services.ai_service import AIServiceError, analyze_scam
 from app.database.database import Base, engine, get_db
 from app.database.models import Analysis
@@ -12,8 +19,18 @@ app = FastAPI(
     version="0.1.0"
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173", #"chrome-extension://YOUR_EXTENSION_ID",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Create database tables if they do not already exist
+
 Base.metadata.create_all(bind=engine)
 
 
@@ -28,10 +45,8 @@ def analyze_message(
     db: Session = Depends(get_db)
 ):
     try:
-        # Send the message to the AI analyzer
         result = analyze_scam(request)
 
-        # Create a database record from the request + AI result
         analysis = Analysis(
             message=request.message,
             sender=request.sender,
@@ -47,11 +62,9 @@ def analyze_message(
             recommended_action=result.recommended_action
         )
 
-        # Save analysis to database
         db.add(analysis)
         db.commit()
 
-        # Return the structured AI result to the extension/client
         return result
 
     except AIServiceError as error:
@@ -59,3 +72,29 @@ def analyze_message(
             status_code=503,
             detail=str(error)
         )
+
+    except SQLAlchemyError as error:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to save analysis"
+        ) from error
+
+
+@app.get(
+    "/api/history",
+    response_model=list[AnalysisHistoryItem]
+)
+def get_analysis_history(
+    db: Session = Depends(get_db)
+):
+    statement = (
+        select(Analysis)
+        .order_by(Analysis.created_at.desc())
+        .limit(50)
+    )
+
+    analyses = db.scalars(statement).all()
+
+    return analyses
