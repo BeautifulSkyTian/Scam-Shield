@@ -14,6 +14,9 @@ class Analysis(Base):
     message: Mapped[str] = mapped_column(Text)
     sender: Mapped[str | None] = mapped_column(String, nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    platform: Mapped[str | None] = mapped_column(String, nullable=True)
+    page_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    message_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     risk_score: Mapped[int] = mapped_column(Integer)
     risk_level: Mapped[str] = mapped_column(String)
