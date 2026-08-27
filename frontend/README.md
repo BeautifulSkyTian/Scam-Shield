@@ -21,7 +21,7 @@ npm run build
 
 Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the generated `frontend/dist` directory.
 
-Select the Scam Shield toolbar icon on any normal webpage to open the side panel.
+Select the Scam Shield toolbar icon on any normal webpage to open its popup, then choose **Open analyzer** to launch the full side panel.
 
 ## Backend
 

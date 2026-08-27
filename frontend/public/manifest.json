@@ -13,7 +13,8 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Open Scam Shield"
+    "default_title": "Open Scam Shield",
+    "default_popup": "popup.html"
   },
   "side_panel": {
     "default_path": "index.html"
