@@ -1,0 +1,26 @@
+{
+    "manifest_version": 3,
+    "name": "Scam Analyzer Extension",
+    "version": "1.0",
+    "permissions": [
+        "contextMenus"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://mail.google.com/*",
+                "https://web.whatsapp.com/*"
+            ],
+            "all_frames": true,
+            "js": [
+                "parsers/scam-parser-module.js",
+                "parsers/gmail-parser.js",
+                "parsers/whatsapp-parser.js",
+                "content.js"
+            ]
+        }
+    ]
+}
