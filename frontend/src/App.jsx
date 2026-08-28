@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "";
+const API_URL = (
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "" : "http://127.0.0.1:8000")
+).replace(/\/$/, "");
 const BACKEND_NAME = API_URL || "http://127.0.0.1:8000";
 const IS_EXTENSION = Boolean(globalThis.chrome?.runtime?.id);
 
 const initialForm = {
   message: "",
   sender: "",
-  url: ""
+  platform: "web",
+  pageUrl: "",
+  links: [{ href: "", text: "" }]
 };
 
 function ShieldIcon({ size = 24 }) {
@@ -87,6 +92,29 @@ function AnalyzerForm({ form, setForm, onSubmit, loading }) {
     }));
   }
 
+  function updateLink(index, field, value) {
+    setForm((current) => ({
+      ...current,
+      links: current.links.map((link, linkIndex) =>
+        linkIndex === index ? { ...link, [field]: value } : link
+      )
+    }));
+  }
+
+  function addLink() {
+    setForm((current) => ({
+      ...current,
+      links: [...current.links, { href: "", text: "" }]
+    }));
+  }
+
+  function removeLink(index) {
+    setForm((current) => ({
+      ...current,
+      links: current.links.filter((_, linkIndex) => linkIndex !== index)
+    }));
+  }
+
   return (
     <section className="analyzer-card">
       <div className="section-heading">
@@ -119,20 +147,81 @@ function AnalyzerForm({ form, setForm, onSubmit, loading }) {
               value={form.sender}
               onChange={updateField}
               type="text"
-              placeholder="e.g. My Bank"
+              placeholder="e.g. My Bank or alerts@example.com"
             />
           </label>
           <label>
-            Included link <span>optional</span>
-            <input
-              name="url"
-              value={form.url}
-              onChange={updateField}
-              type="url"
-              placeholder="https://..."
-            />
+            Message source <span>optional</span>
+            <select name="platform" value={form.platform} onChange={updateField}>
+              <option value="web">Website</option>
+              <option value="email">Email</option>
+              <option value="sms">Text message</option>
+              <option value="social">Social media</option>
+              <option value="marketplace">Marketplace</option>
+              <option value="other">Other</option>
+            </select>
           </label>
         </div>
+
+        <details className="context-fields">
+          <summary>
+            Add links and page context <span>optional, improves accuracy</span>
+          </summary>
+
+          <label>
+            Page where you saw it <span>optional</span>
+            <input
+              name="pageUrl"
+              value={form.pageUrl}
+              onChange={updateField}
+              type="url"
+              placeholder="https://example.com/inbox"
+            />
+          </label>
+
+          <div className="link-editor">
+            <div className="link-editor-heading">
+              <div>
+                <strong>Links in the message</strong>
+                <span>Add the visible label too when it differs from the destination.</span>
+              </div>
+              <button type="button" onClick={addLink}>+ Add link</button>
+            </div>
+
+            {form.links.map((link, index) => (
+              <div className="link-input-row" key={index}>
+                <label>
+                  Destination
+                  <input
+                    type="url"
+                    value={link.href}
+                    onChange={(event) => updateLink(index, "href", event.target.value)}
+                    placeholder="https://example.com"
+                  />
+                </label>
+                <label>
+                  Displayed text <span>optional</span>
+                  <input
+                    type="text"
+                    value={link.text}
+                    onChange={(event) => updateLink(index, "text", event.target.value)}
+                    placeholder="e.g. paypal.com"
+                  />
+                </label>
+                {form.links.length > 1 && (
+                  <button
+                    className="remove-link"
+                    type="button"
+                    onClick={() => removeLink(index)}
+                    aria-label={`Remove link ${index + 1}`}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
 
         <button className="primary-button" type="submit" disabled={loading}>
           {loading ? <span className="button-spinner" /> : <ShieldIcon size={19} />}
@@ -270,7 +359,7 @@ function ResultCard({ result, onReset }) {
   );
 }
 
-function HistoryPanel({ history, status, onSelect }) {
+function HistoryPanel({ history, status, onSelect, onRetry }) {
   return (
     <aside className="history-card">
       <div className="history-heading">
@@ -289,7 +378,10 @@ function HistoryPanel({ history, status, onSelect }) {
       )}
 
       {status === "error" && (
-        <div className="history-empty">History is currently unavailable.</div>
+        <div className="history-empty">
+          <p>History is currently unavailable.</p>
+          <button className="text-button" type="button" onClick={onRetry}>Try again</button>
+        </div>
       )}
 
       {status === "ready" && history.length === 0 && (
@@ -333,20 +425,33 @@ function App() {
   const [error, setError] = useState("");
   const [history, setHistory] = useState([]);
   const [historyStatus, setHistoryStatus] = useState("loading");
+  const [backendStatus, setBackendStatus] = useState("checking");
+
+  const checkBackend = useCallback(async () => {
+    try {
+      await request("/health");
+      setBackendStatus("connected");
+    } catch {
+      setBackendStatus("offline");
+    }
+  }, []);
 
   const loadHistory = useCallback(async () => {
     try {
       const items = await request("/api/history");
       setHistory(items);
       setHistoryStatus("ready");
+      setBackendStatus("connected");
     } catch {
       setHistoryStatus("error");
+      setBackendStatus("offline");
     }
   }, []);
 
   useEffect(() => {
+    checkBackend();
     loadHistory();
-  }, [loadHistory]);
+  }, [checkBackend, loadHistory]);
 
   useEffect(() => {
     const extensionApi = globalThis.chrome;
@@ -372,22 +477,33 @@ function App() {
     setError("");
 
     try {
+      const links = form.links
+        .filter((link) => link.href.trim())
+        .map((link) => ({
+          href: link.href.trim(),
+          text: link.text.trim() || null
+        }));
+
       const analysis = await request("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: form.message.trim(),
           sender: form.sender.trim() || null,
-          url: form.url.trim() || null,
-          platform: "web",
-          page_url: window.location.href
+          url: links[0]?.href || null,
+          links,
+          platform: form.platform || null,
+          page_url: form.pageUrl.trim() || null,
+          message_id: globalThis.crypto?.randomUUID?.() || `web-${Date.now()}`
         })
       });
 
       setResult(analysis);
+      setBackendStatus("connected");
       loadHistory();
     } catch (requestError) {
       setError(requestError.message);
+      if (requestError.message.startsWith("Cannot reach")) setBackendStatus("offline");
     } finally {
       setLoading(false);
     }
@@ -439,9 +555,19 @@ function App() {
           </span>
         </div>
 
-        <div className="mode-switch" aria-label="Analysis mode">
-          <button type="button" onClick={switchToBasicMode}>Basic</button>
-          <span className="active-mode">Advanced</span>
+        <div className="header-actions">
+          <span className={`status-pill status-${backendStatus}`}>
+            <span />
+            {backendStatus === "connected"
+              ? "Backend connected"
+              : backendStatus === "offline"
+                ? "Backend offline"
+                : "Checking backend"}
+          </span>
+          <div className="mode-switch" aria-label="Analysis mode">
+            <button type="button" onClick={switchToBasicMode}>Basic</button>
+            <span className="active-mode">Advanced</span>
+          </div>
         </div>
       </header>
 
@@ -487,6 +613,7 @@ function App() {
             history={history}
             status={historyStatus}
             onSelect={selectHistory}
+            onRetry={loadHistory}
           />
         </div>
       </main>
