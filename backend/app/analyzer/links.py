@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-import httpx2 as httpx
+import httpx
 
 from .categories import Severity, Signal
 from .schema import LinkInput, LinkVerdict

@@ -26,7 +26,7 @@ import json
 import os
 import random
 
-import httpx2 as httpx
+import httpx
 
 from ..ratelimit import RateLimiter
 from ..schema import ModelVerdict

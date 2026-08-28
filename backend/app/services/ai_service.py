@@ -136,6 +136,11 @@ def analyze_scam(request: AnalyzeRequest) -> AnalyzeResponse:
 
 def rate_limit_status() -> dict | None:
     """Remaining free-tier quota this minute, for /health."""
+    # Health checks must keep working before local AI credentials are set.
+    # Avoid constructing the provider here because it requires an API key.
+    if not GEMINI_API_KEY:
+        return None
+
     limiter = getattr(_runtime.analyzer.provider, "limiter", None)
     if limiter is None:
         return None
