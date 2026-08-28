@@ -11,7 +11,7 @@ from app.schemas import (
     BatchAnalyzeRequest,
     BatchAnalyzeResponse,
 )
-from app.services.ai_service import AIServiceError, analyze_scam
+from app.services.ai_service import AIServiceError, analyze_scam, rate_limit_status
 from app.database.database import Base, engine, get_db
 from app.database.models import Analysis
 from app.core.config import ALLOWED_ORIGINS
@@ -36,7 +36,12 @@ Base.metadata.create_all(bind=engine)
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    # Includes remaining free-tier quota for this minute. Worth showing during
+    # a demo so a rate-limit stall reads as a quota issue, not a crash.
+    return {
+        "status": "ok",
+        "rate_limit": rate_limit_status(),
+    }
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)

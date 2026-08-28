@@ -16,3 +16,9 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+# Local SQLite databases (the committed app/scam_guard.db predates this)
+*.db-journal
+backend/scam_guard.db
+
+# Python test / tooling caches
+.pytest_cache/
