@@ -14,7 +14,7 @@ from app.schemas import (
 from app.services.ai_service import AIServiceError, analyze_scam, rate_limit_status
 from app.database.database import Base, engine, get_db
 from app.database.models import Analysis
-from app.core.config import ALLOWED_ORIGINS
+from app.core.config import ALLOWED_ORIGIN_REGEX, ALLOWED_ORIGINS
 
 
 app = FastAPI(
@@ -25,6 +25,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
