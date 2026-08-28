@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const API_URL = import.meta.env.VITE_API_URL ?? "";
+const BACKEND_NAME = API_URL || "http://127.0.0.1:8000";
+const IS_EXTENSION = Boolean(globalThis.chrome?.runtime?.id);
 
 const initialForm = {
   message: "",
@@ -21,11 +23,21 @@ function ShieldIcon({ size = 24 }) {
   );
 }
 
-function getRiskTone(score) {
-  if (score <= 20) return { key: "low", label: "Low risk" };
-  if (score <= 60) return { key: "suspicious", label: "Suspicious" };
-  if (score <= 80) return { key: "high", label: "High risk" };
-  return { key: "extreme", label: "Extremely high risk" };
+function getRiskTone(score, action) {
+  const tones = {
+    allow: { key: "safe", label: "Safe" },
+    notice: { key: "low", label: "Low risk" },
+    warn: { key: "medium", label: "Suspicious" },
+    strong_warn: { key: "high", label: "High risk" },
+    block: { key: "critical", label: "Critical risk" }
+  };
+
+  if (tones[action]) return tones[action];
+  if (score <= 24) return tones.allow;
+  if (score <= 44) return tones.notice;
+  if (score <= 69) return tones.warn;
+  if (score <= 87) return tones.strong_warn;
+  return tones.block;
 }
 
 async function request(path, options) {
@@ -48,7 +60,7 @@ async function request(path, options) {
   try {
     response = await fetch(`${API_URL}${path}`, options);
   } catch {
-    throw new Error(`Cannot reach the backend at ${API_URL}. Make sure FastAPI is running.`);
+    throw new Error(`Cannot reach the backend at ${BACKEND_NAME}. Make sure FastAPI is running.`);
   }
 
   if (!response.ok) {
@@ -132,7 +144,15 @@ function AnalyzerForm({ form, setForm, onSubmit, loading }) {
 }
 
 function ResultCard({ result, onReset }) {
-  const tone = getRiskTone(result.risk_score);
+  const tone = getRiskTone(result.risk_score, result.action);
+  const manipulation = result.tone
+    ? [
+        ["Pressure", result.tone.pressure],
+        ["Fear", result.tone.fear],
+        ["Greed", result.tone.greed],
+        ["Authority", result.tone.authority]
+      ]
+    : [];
 
   return (
     <section className={`result-card tone-${tone.key}`}>
@@ -156,8 +176,25 @@ function ResultCard({ result, onReset }) {
 
       <div className="summary-box">
         <span className="eyebrow">THE GUARD SAYS</span>
-        <p>{result.summary}</p>
+        <p>{result.headline || result.summary}</p>
       </div>
+
+      {(result.confidence || result.analyzed_by || result.analysis_ms != null) && (
+        <div className="analysis-meta">
+          {result.confidence && <span>{result.confidence} confidence</span>}
+          {result.analyzed_by && <span>Analyzed by {result.analyzed_by.replaceAll("_", " ")}</span>}
+          {result.cached && <span>Cached result</span>}
+          {result.analysis_ms != null && <span>{result.analysis_ms} ms</span>}
+          {result.degraded && <span className="degraded-chip">Limited analysis</span>}
+        </div>
+      )}
+
+      {result.likely_goal && (
+        <div className="goal-box">
+          <span className="eyebrow">LIKELY GOAL</span>
+          <p>{result.likely_goal}</p>
+        </div>
+      )}
 
       <div className="findings">
         <h3>What I noticed</h3>
@@ -168,11 +205,53 @@ function ResultCard({ result, onReset }) {
               <div>
                 <h4>{reason.type}</h4>
                 <p>{reason.explanation}</p>
+                {reason.evidence && <blockquote>“{reason.evidence}”</blockquote>}
+                {(reason.severity || reason.contribution != null || reason.source) && (
+                  <div className="finding-meta">
+                    {reason.severity && <span>{reason.severity}</span>}
+                    {reason.contribution != null && <span>+{reason.contribution} points</span>}
+                    {reason.source && <span>{reason.source.replaceAll("_", " ")}</span>}
+                  </div>
+                )}
               </div>
             </article>
           ))}
         </div>
       </div>
+
+      {result.links?.length > 0 && (
+        <div className="advanced-section">
+          <h3>Link checks</h3>
+          <div className="link-list">
+            {result.links.map((link, index) => (
+              <article className={`link-result verdict-${link.verdict}`} key={`${link.url}-${index}`}>
+                <div>
+                  <strong>{link.domain || link.url}</strong>
+                  <span>{link.verdict}</span>
+                </div>
+                {link.display_text && <p>Displayed as “{link.display_text}”</p>}
+                {link.reasons?.map((reason) => <p key={reason}>{reason}</p>)}
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {result.tone && (
+        <div className="advanced-section">
+          <h3>Manipulation analysis</h3>
+          <p className="tone-summary">{result.tone.summary}</p>
+          <div className="tone-list">
+            {manipulation.map(([label, value]) => (
+              <div className="tone-row" key={label}>
+                <span>{label}</span>
+                <div><i style={{ width: `${value}%` }} /></div>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="recommendation">
         <span className="recommendation-icon">
@@ -223,7 +302,7 @@ function HistoryPanel({ history, status, onSelect }) {
       {history.length > 0 && (
         <div className="history-list">
           {history.map((item) => {
-            const tone = getRiskTone(item.risk_score);
+            const tone = getRiskTone(item.risk_score, item.action);
 
             return (
               <button
@@ -326,8 +405,29 @@ function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  async function switchToBasicMode() {
+    if (!IS_EXTENSION) {
+      window.location.href = "/popup.html";
+      return;
+    }
+
+    try {
+      const [tab] = await globalThis.chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) throw new Error("No active tab found.");
+
+      const response = await globalThis.chrome.runtime.sendMessage({
+        type: "SCAM_SHIELD_SWITCH_TO_BASIC",
+        windowId: tab.windowId
+      });
+
+      if (!response?.ok) throw new Error(response?.error || "Mode switch failed.");
+    } catch {
+      setError("Close this panel, then click the Scam Shield toolbar icon to open Basic mode.");
+    }
+  }
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${IS_EXTENSION ? "extension-shell" : ""}`}>
       <header className="site-header">
         <div className="brand" aria-label="Scam Shield">
           <span className="brand-mark">
@@ -335,13 +435,13 @@ function App() {
           </span>
           <span>
             <strong>Scam Shield</strong>
-            <small>Your message guard</small>
+            <small>Advanced mode</small>
           </span>
         </div>
 
-        <div className="status-pill">
-          <span />
-          AI-powered protection
+        <div className="mode-switch" aria-label="Analysis mode">
+          <button type="button" onClick={switchToBasicMode}>Basic</button>
+          <span className="active-mode">Advanced</span>
         </div>
       </header>
 
@@ -349,7 +449,7 @@ function App() {
         <div className="hero-copy">
           <span className="hero-badge">
             <ShieldIcon size={15} />
-            The Guard is watching
+            Advanced analysis
           </span>
           <h1>Think before you click.</h1>
           <p>

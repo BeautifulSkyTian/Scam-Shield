@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Scam Shield",
-  "version": "0.1.0",
+  "version": "0.2.4",
   "description": "Analyze suspicious messages and explain their risk.",
-  "minimum_chrome_version": "116",
-  "permissions": ["sidePanel", "storage"],
+  "minimum_chrome_version": "141",
+  "permissions": ["sidePanel", "storage", "activeTab", "scripting"],
   "host_permissions": [
     "http://127.0.0.1:8000/*",
     "http://localhost:8000/*"

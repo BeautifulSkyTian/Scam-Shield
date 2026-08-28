@@ -1,12 +1,6 @@
 const API_URL = "http://127.0.0.1:8000";
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-});
-
-chrome.runtime.onStartup.addListener(() => {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-});
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "SCAM_SHIELD_API_REQUEST") {
@@ -18,7 +12,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "SCAM_SHIELD_OPEN_RESULT") {
-    openResult(message.result, sender)
+    openResult(message.result, sender, message.tabId)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+
+    return true;
+  }
+
+  if (message.type === "SCAM_SHIELD_SWITCH_TO_BASIC") {
+    switchToBasic(message.windowId)
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
 
@@ -58,11 +60,18 @@ async function requestBackend(message) {
   return response.json();
 }
 
-async function openResult(result, sender) {
-  const panelRequest = sender.tab?.id
-    ? chrome.sidePanel.open({ tabId: sender.tab.id })
+async function openResult(result, sender, requestedTabId) {
+  const tabId = requestedTabId || sender.tab?.id;
+  const panelRequest = tabId
+    ? chrome.sidePanel.open({ tabId })
     : Promise.resolve();
 
   await chrome.storage.session.set({ selectedAnalysis: result });
   await panelRequest;
+}
+
+async function switchToBasic(windowId) {
+  await chrome.sidePanel.close({ windowId });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await chrome.action.openPopup({ windowId });
 }

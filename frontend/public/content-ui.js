@@ -1,15 +1,30 @@
+(() => {
+if (window.__scamShieldContentUiLoaded) return;
+window.__scamShieldContentUiLoaded = true;
+
 const riskTones = {
-  low: { label: "Low risk", color: "#158464", background: "#e9f6f1" },
-  suspicious: { label: "Suspicious", color: "#a86005", background: "#fff4df" },
+  safe: { label: "Safe", color: "#158464", background: "#e9f6f1" },
+  low: { label: "Low risk", color: "#8a6a08", background: "#fbf5dc" },
+  medium: { label: "Suspicious", color: "#a86005", background: "#fff4df" },
   high: { label: "High risk", color: "#c74429", background: "#fff0eb" },
-  extreme: { label: "Extremely high risk", color: "#b51f37", background: "#fdecef" }
+  critical: { label: "Critical risk", color: "#b51f37", background: "#fdecef" }
 };
 
-function getRiskTone(score) {
-  if (score <= 20) return "low";
-  if (score <= 60) return "suspicious";
-  if (score <= 80) return "high";
-  return "extreme";
+function getRiskTone(result) {
+  const actions = {
+    allow: "safe",
+    notice: "low",
+    warn: "medium",
+    strong_warn: "high",
+    block: "critical"
+  };
+
+  if (actions[result.action]) return actions[result.action];
+  if (result.risk_score <= 24) return "safe";
+  if (result.risk_score <= 44) return "low";
+  if (result.risk_score <= 69) return "medium";
+  if (result.risk_score <= 87) return "high";
+  return "critical";
 }
 
 async function analyzeMessage(payload) {
@@ -29,13 +44,19 @@ function renderAnalysis(element, result) {
 
   element.querySelector(":scope > scam-shield-warning")?.remove();
 
-  const toneKey = getRiskTone(result.risk_score);
+  const toneKey = getRiskTone(result);
   const tone = riskTones[toneKey];
   const originalPosition = getComputedStyle(element).position;
 
+  element.style.outline = "none";
+  element.style.outlineOffset = "0";
+  delete element.dataset.scamShieldRisk;
+
+  if (toneKey === "safe") return null;
+
   if (originalPosition === "static") element.style.position = "relative";
 
-  const outlineWidth = toneKey === "low" ? 0 : toneKey === "suspicious" ? 1 : 3;
+  const outlineWidth = toneKey === "low" ? 0 : toneKey === "medium" ? 1 : 3;
   element.style.outline = outlineWidth ? `${outlineWidth}px solid ${tone.color}` : "none";
   element.style.outlineOffset = outlineWidth ? "3px" : "0";
   element.dataset.scamShieldRisk = toneKey;
@@ -43,12 +64,12 @@ function renderAnalysis(element, result) {
   const warning = document.createElement("scam-shield-warning");
   const shadow = warning.attachShadow({ mode: "open" });
   warning.style.position = "absolute";
-  warning.style.inset = toneKey === "extreme" ? "-3px" : "8px 8px auto auto";
+  warning.style.inset = toneKey === "critical" ? "-3px" : "8px 8px auto auto";
   warning.style.zIndex = "2147483646";
   warning.style.pointerEvents = "none";
 
-  shadow.innerHTML = toneKey === "extreme"
-    ? createExtremeWarning(result, tone)
+  shadow.innerHTML = toneKey === "critical"
+    ? createCriticalWarning(result, tone)
     : createBadge(result, tone);
 
   const openButton = shadow.querySelector("[data-open-analysis]");
@@ -92,7 +113,7 @@ function createBadge(result, tone) {
     </button>`;
 }
 
-function createExtremeWarning(result, tone) {
+function createCriticalWarning(result, tone) {
   return `
     <style>
       .cover { position: absolute; inset: 0; display: grid; place-items: center; border: 2px solid ${tone.color}; border-radius: 8px; background: rgba(253, 236, 239, .82); backdrop-filter: blur(7px); pointer-events: auto; font-family: system-ui, sans-serif; }
@@ -108,7 +129,7 @@ function createExtremeWarning(result, tone) {
     <div class="cover">
       <div class="content">
         ${shieldIcon()}
-        <strong>Extremely high risk</strong>
+        <strong>Critical risk</strong>
         <p>Scam Shield hid this message because it may be dangerous.</p>
         <div class="actions">
           <button type="button" data-open-analysis>View analysis</button>
@@ -127,3 +148,41 @@ window.ScamShieldFrontend = {
   renderAnalysis,
   analyzeAndRender
 };
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type !== "SCAM_SHIELD_GET_SELECTION") return;
+  sendResponse({ ok: true, selection: readHighlightedMessage() });
+});
+
+function readHighlightedMessage() {
+  const selection = window.getSelection();
+
+  if (!selection || selection.rangeCount === 0) return null;
+
+  const text = selection.toString().trim();
+  if (!text) return null;
+
+  const range = selection.getRangeAt(0);
+  const links = [...document.querySelectorAll("a[href]")]
+    .filter((link) => {
+      try {
+        return range.intersectsNode(link);
+      } catch {
+        return false;
+      }
+    })
+    .map((link) => ({
+      href: link.href,
+      text: link.textContent.trim() || null
+    }));
+
+  return {
+    message: text,
+    sender: null,
+    links,
+    platform: location.hostname,
+    page_url: location.href
+  };
+}
+
+})();
